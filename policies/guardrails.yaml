@@ -1,0 +1,54 @@
+# Guardrail configuration.
+#
+# HONESTY NOTE (quoted in benchmarks and the README): check latencies are
+# CALIBRATED SYNTHETICS, not measurements of real engines. Ranges are drawn
+# from published figures for each check family — regex rules engines run
+# single-digit-to-tens of ms, lightweight classifiers tens-to-low-hundreds,
+# LLM-as-judge hundreds. The sequential-vs-parallel DELTA measured on top of
+# them is a real property of the orchestration code.
+
+version: "2026.07.14-1"
+
+latencies_ms:
+  rules: [5, 20]
+  classifier: [50, 150]
+  judge: [300, 600]
+
+rules:
+  secret_patterns:
+    - "AKIA[0-9A-Z]{16}"                     # AWS access key id
+    - "-----BEGIN (RSA )?PRIVATE KEY-----"
+    - "(?i)(api_key|apikey|password|secret)\\s*[:=]\\s*\\S+"
+  injection_markers:
+    - "(?i)ignore (all )?previous instructions"
+    - "(?i)disregard (the |your )?(system )?prompt"
+    - "(?i)you are now (in )?(dan|developer mode)"
+  denied_verbs:
+    - "(?i)\\bdrop\\s+table\\b"
+    - "(?i)\\btruncate\\s+table\\b"
+    - "(?i)\\brm\\s+-rf\\b"
+
+classifier:
+  # keyword-scoring stand-in for an ML classifier; score = capped sum of weights
+  threshold: 0.65
+  keywords:
+    exfiltrate: 0.6
+    bypass: 0.4
+    wipe: 0.35
+    purge: 0.3
+    override: 0.3
+    credentials: 0.3
+    delete: 0.25
+    pii: 0.25
+    everything: 0.2
+    customer: 0.15
+    archive: 0.1
+
+judge:
+  # heuristic fallback judge (no API key needed); an LLM judge is pluggable
+  threshold: 0.7
+  signals:
+    pii_target: 0.5        # action targets a PII-looking dataset
+    external_recipient: 0.4
+    admin_grant: 0.5
+    mass_scope: 0.3        # wildcards / "all" scopes

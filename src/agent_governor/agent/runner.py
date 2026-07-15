@@ -75,6 +75,12 @@ class AgentRunner:
         kind = state["plan"][state["idx"]]
         memory = dict(state["memory"])
         call, error_mode = self._policy.emit(kind, memory)
+        call = call.model_copy(
+            update={
+                "reasoning": f"step {state['idx'] + 1}/{len(state['plan'])} "
+                f"{kind.value}: remediation of {memory['incident_id']}"
+            }
+        )
         exec_result = self._executor.execute(call)
         result = exec_result.result
 

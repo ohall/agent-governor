@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -30,3 +31,16 @@ class WardenSettings(BaseSettings):
         "cross-process approval (demo: .governor/approvals.sqlite3).",
     )
     policy_path: str = "policies/classification.yaml"
+    audit_db: str = Field(
+        default=":memory:",
+        description="SQLite path for the audit/trace store. Use a real file so "
+        "`warden audit` can read it from another process.",
+    )
+    guardrails_mode: Literal["off", "sequential", "parallel"] = Field(
+        default="off",
+        description="Guardrail orchestration for the gateway's auto path. Off by "
+        "default because check latencies are calibrated synthetics; the demo and "
+        "benchmarks enable it explicitly.",
+    )
+    guardrails_path: str = "policies/guardrails.yaml"
+    guardrails_seed: int = 42

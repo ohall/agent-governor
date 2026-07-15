@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS approvals (
     owner TEXT NOT NULL,
     tool TEXT NOT NULL,
     params_json TEXT NOT NULL,
+    reasoning TEXT,
     action_class TEXT NOT NULL,
     category TEXT,
     risk TEXT NOT NULL,
@@ -54,6 +55,7 @@ class ApprovalRequest(BaseModel):
     owner: str
     tool: str
     params: dict[str, Any]
+    reasoning: str | None = None
     action_class: str
     category: str | None
     risk: str
@@ -106,6 +108,7 @@ class ApprovalQueue:
         tool: str,
         params: dict[str, Any],
         action_class: str,
+        reasoning: str | None = None,
         category: str | None,
         risk: str,
         timeout_s: int,
@@ -117,6 +120,7 @@ class ApprovalQueue:
             owner=owner,
             tool=tool,
             params=params,
+            reasoning=reasoning,
             action_class=action_class,
             category=category,
             risk=risk,
@@ -124,7 +128,7 @@ class ApprovalQueue:
             timeout_s=timeout_s,
         )
         self._run(
-            "INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO approvals VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 request.id,
                 request.created_at.isoformat(),
@@ -132,6 +136,7 @@ class ApprovalQueue:
                 request.owner,
                 request.tool,
                 json.dumps(request.params),
+                request.reasoning,
                 request.action_class,
                 request.category,
                 request.risk,
@@ -218,12 +223,13 @@ class ApprovalQueue:
             owner=row[3],
             tool=row[4],
             params=json.loads(row[5]),
-            action_class=row[6],
-            category=row[7],
-            risk=row[8],
-            status=ApprovalStatus(row[9]),
-            timeout_s=row[10],
-            decided_by=row[11],
-            decided_at=datetime.fromisoformat(row[12]) if row[12] else None,
-            reason=row[13],
+            reasoning=row[6],
+            action_class=row[7],
+            category=row[8],
+            risk=row[9],
+            status=ApprovalStatus(row[10]),
+            timeout_s=row[11],
+            decided_by=row[12],
+            decided_at=datetime.fromisoformat(row[13]) if row[13] else None,
+            reason=row[14],
         )

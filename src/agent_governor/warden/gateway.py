@@ -20,8 +20,12 @@ import httpx
 from pydantic import BaseModel, Field
 
 from agent_governor.warden.approvals import ApprovalQueue, ApprovalStatus
+from agent_governor.warden.audit import AuditStore, Trace
 from agent_governor.warden.authz import AuthzPath, authorize
 from agent_governor.warden.config import WardenSettings
+from agent_governor.warden.guardrails.config import GuardrailConfig
+from agent_governor.warden.guardrails.models import GuardrailInput, GuardrailReport
+from agent_governor.warden.guardrails.pipeline import GuardrailPipeline, build_pipeline
 from agent_governor.warden.identity import TokenClaims, TokenError, TokenIssuer
 from agent_governor.warden.levels import AutonomyLevel
 from agent_governor.warden.policy import PolicyEngine
@@ -55,6 +59,11 @@ class GatewaySession:
 class ToolCall(BaseModel):
     tool: str
     params: dict[str, Any] = Field(default_factory=dict)
+    reasoning: str | None = Field(
+        default=None,
+        description="The agent's stated intent for this action; scanned by "
+        "guardrails and preserved in the audit trail.",
+    )
 
 
 class AuthzInfo(BaseModel):
@@ -82,6 +91,7 @@ class ToolResult(BaseModel):
     fault: str | None = None
     error: str | None = None
     authz: AuthzInfo | None = None
+    guardrails: GuardrailReport | None = None
 
 
 @dataclass(frozen=True)
@@ -205,6 +215,14 @@ class Gateway:
         self._issuer = TokenIssuer(
             self.settings.jwt_secret, self.settings.token_ttl_s, clock=self._clock
         )
+        self.audit = AuditStore(self.settings.audit_db, clock=self._clock)
+        self.guardrails: GuardrailPipeline | None = None
+        if self.settings.guardrails_mode != "off":
+            self.guardrails = build_pipeline(
+                GuardrailConfig.from_yaml(self.settings.guardrails_path),
+                self.settings.guardrails_mode,
+                seed=self.settings.guardrails_seed,
+            )
         self._manifests: dict[str, AgentManifest] = {}
         self._levels: dict[str, AutonomyLevel] = {}
         self.action_log: list[ActionRecord] = []
@@ -241,16 +259,23 @@ class Gateway:
 
     def execute(self, session: GatewaySession, call: ToolCall) -> ToolResult:
         action_id = f"ACT-{uuid.uuid4().hex[:10]}"
+        trace = Trace()
 
-        try:
-            claims = self._issuer.validate(session.token)
-        except TokenError as exc:
-            return self._deny(action_id, session, call, str(exc), path="denied")
+        claims: TokenClaims | None
+        token_error = ""
+        with trace.span("identity.validate"):
+            try:
+                claims = self._issuer.validate(session.token)
+            except TokenError as exc:
+                claims = None
+                token_error = str(exc)
+        if claims is None:
+            return self._deny(action_id, session, call, token_error, trace=trace)
 
         spec = TOOL_REGISTRY.get(call.tool)
         if spec is None:
             return self._deny(
-                action_id, session, call, f"unknown tool {call.tool!r}", claims=claims
+                action_id, session, call, f"unknown tool {call.tool!r}", claims=claims, trace=trace
             )
         if call.tool not in claims.scope:
             return self._deny(
@@ -259,23 +284,28 @@ class Gateway:
                 call,
                 f"tool {call.tool!r} outside token scope",
                 claims=claims,
+                trace=trace,
             )
 
-        classification = self.policy.classify(call.tool, call.params)
+        with trace.span("policy.classify", attrs={"policy.version": self.policy.version}):
+            classification = self.policy.classify(call.tool, call.params)
         level = self.current_level(claims.sub)
-        decision = authorize(level, classification)
+        with trace.span("authz.decide", attrs={"authz.level": int(level)}):
+            decision = authorize(level, classification)
 
         if decision.path is AuthzPath.APPROVAL_REQUIRED:
-            request = self.queue.submit(
-                agent_id=claims.sub,
-                owner=claims.owner,
-                tool=call.tool,
-                params=call.params,
-                action_class=classification.action_class.value,
-                category=classification.category.value if classification.category else None,
-                risk=classification.risk.value,
-                timeout_s=self.settings.approval_timeout_s,
-            )
+            with trace.span("approval.submit"):
+                request = self.queue.submit(
+                    agent_id=claims.sub,
+                    owner=claims.owner,
+                    tool=call.tool,
+                    params=call.params,
+                    reasoning=call.reasoning,
+                    action_class=classification.action_class.value,
+                    category=classification.category.value if classification.category else None,
+                    risk=classification.risk.value,
+                    timeout_s=self.settings.approval_timeout_s,
+                )
             authz = AuthzInfo(
                 path="queued",
                 level=int(level),
@@ -295,7 +325,7 @@ class Gateway:
                 error=f"queued for human approval ({decision.reason})",
                 authz=authz,
             )
-            self._record(action_id, session, call, result, authz, claims)
+            self._record(action_id, session, call, result, authz, claims, trace)
             return result
 
         authz = AuthzInfo(
@@ -307,7 +337,62 @@ class Gateway:
             policy_version=classification.policy_version,
             reason=decision.reason,
         )
-        return self._forward(action_id, session, call, spec, authz, claims)
+
+        report = self._run_guardrails(action_id, session, call, trace)
+        if report is not None and not report.passed:
+            tripped = ", ".join(f"{v.check} ({'; '.join(v.reasons)})" for v in report.tripped)
+            authz = authz.model_copy(update={"path": "guardrail_blocked"})
+            result = ToolResult(
+                tool=call.tool,
+                status_code=0,
+                ok=False,
+                denied=True,
+                error=f"guardrail tripped: {tripped}",
+                authz=authz,
+                guardrails=report,
+            )
+            self._record(action_id, session, call, result, authz, claims, trace)
+            return result
+
+        return self._forward(action_id, session, call, spec, authz, claims, trace, report)
+
+    def _run_guardrails(
+        self,
+        action_id: str,
+        session: GatewaySession,
+        call: ToolCall,
+        trace: Trace,
+    ) -> GuardrailReport | None:
+        if self.guardrails is None:
+            return None
+        start_offset = trace.offset_ms()
+        report = self.guardrails.run_sync(
+            GuardrailInput(
+                agent_id=session.manifest.agent_id,
+                tool=call.tool,
+                params=call.params,
+                reasoning=call.reasoning,
+            ),
+            action_id,
+        )
+        parent = trace.add_span(
+            f"guardrails.{report.mode}",
+            start_offset,
+            report.total_latency_ms,
+            attrs={"passed": report.passed},
+        )
+        child_offset = start_offset
+        for verdict in report.verdicts:
+            trace.add_span(
+                f"guardrails.{verdict.check}",
+                child_offset,
+                verdict.latency_ms,
+                parent_id=parent,
+                attrs={"passed": verdict.passed, "score": verdict.score},
+            )
+            if report.mode == "sequential":
+                child_offset += verdict.latency_ms
+        return report
 
     def await_approval(
         self,
@@ -328,6 +413,7 @@ class Gateway:
                 return self._execute_approved(session, request)
             if request.status in (ApprovalStatus.DENIED, ApprovalStatus.EXPIRED):
                 action_id = f"ACT-{uuid.uuid4().hex[:10]}"
+                trace = Trace()
                 call = ToolCall(tool=request.tool, params=request.params)
                 authz = AuthzInfo(
                     path="denied",
@@ -350,7 +436,7 @@ class Gateway:
                     + (f" by {request.decided_by}" if request.decided_by else ""),
                     authz=authz,
                 )
-                self._record(action_id, session, call, result, authz, claims=None)
+                self._record(action_id, session, call, result, authz, None, trace)
                 return result
             if time.monotonic() >= deadline:
                 return ToolResult(
@@ -365,13 +451,17 @@ class Gateway:
 
     def _execute_approved(self, session: GatewaySession, request: Any) -> ToolResult:
         action_id = f"ACT-{uuid.uuid4().hex[:10]}"
-        call = ToolCall(tool=request.tool, params=request.params)
-        try:
-            claims = self._issuer.validate(session.token)
-        except TokenError:
-            session = self.refresh(session.manifest.agent_id)
-            claims = self._issuer.validate(session.token)
+        trace = Trace()
+        call = ToolCall(tool=request.tool, params=request.params, reasoning=request.reasoning)
+        with trace.span("identity.validate"):
+            try:
+                claims = self._issuer.validate(session.token)
+            except TokenError:
+                session = self.refresh(session.manifest.agent_id)
+                claims = self._issuer.validate(session.token)
         spec = TOOL_REGISTRY[request.tool]
+        # Guardrails are deliberately skipped here: an explicit, named human
+        # approval outranks advisory checks, and that decision is audited.
         authz = AuthzInfo(
             path="human_approved",
             level=int(self.current_level(request.agent_id)),
@@ -383,7 +473,7 @@ class Gateway:
             approval_id=request.id,
             decided_by=request.decided_by,
         )
-        return self._forward(action_id, session, call, spec, authz, claims)
+        return self._forward(action_id, session, call, spec, authz, claims, trace, None)
 
     # --- internals -----------------------------------------------------------
 
@@ -395,19 +485,25 @@ class Gateway:
         spec: ToolSpec,
         authz: AuthzInfo,
         claims: TokenClaims,
+        trace: Trace,
+        report: GuardrailReport | None = None,
     ) -> ToolResult:
         try:
             url, body, query = spec.build(call.params)
         except ToolSpecError as exc:
-            return self._deny(action_id, session, call, str(exc), claims=claims)
+            return self._deny(action_id, session, call, str(exc), claims=claims, trace=trace)
 
-        response = self._client.request(
-            spec.method,
-            url,
-            json=body or None,
-            params=query or None,
-            headers={"Authorization": f"Bearer {session.token}"},
-        )
+        with trace.span(
+            "tool.execute",
+            attrs={"gen_ai.tool.name": call.tool, "http.request.method": spec.method},
+        ):
+            response = self._client.request(
+                spec.method,
+                url,
+                json=body or None,
+                params=query or None,
+                headers={"Authorization": f"Bearer {session.token}"},
+            )
         try:
             data: Any = response.json()
         except ValueError:
@@ -419,8 +515,9 @@ class Gateway:
             data=data,
             fault=response.headers.get(FAULT_HEADER),
             authz=authz,
+            guardrails=report,
         )
-        self._record(action_id, session, call, result, authz, claims)
+        self._record(action_id, session, call, result, authz, claims, trace)
         return result
 
     def _deny(
@@ -431,6 +528,7 @@ class Gateway:
         reason: str,
         claims: TokenClaims | None = None,
         path: str = "denied",
+        trace: Trace | None = None,
     ) -> ToolResult:
         authz = AuthzInfo(
             path=path,
@@ -440,7 +538,7 @@ class Gateway:
         result = ToolResult(
             tool=call.tool, status_code=0, ok=False, denied=True, error=reason, authz=authz
         )
-        self._record(action_id, session, call, result, authz, claims)
+        self._record(action_id, session, call, result, authz, claims, trace)
         return result
 
     def _record(
@@ -451,26 +549,34 @@ class Gateway:
         result: ToolResult,
         authz: AuthzInfo | None,
         claims: TokenClaims | None,
+        trace: Trace | None = None,
     ) -> None:
-        self.action_log.append(
-            ActionRecord(
-                action_id=action_id,
-                timestamp=self._clock(),
-                agent_id=session.manifest.agent_id,
-                tool=call.tool,
-                params=dict(call.params),
-                status_code=result.status_code,
-                ok=result.ok,
-                denied=result.denied,
-                fault=result.fault,
-                level=authz.level if authz else None,
-                path=authz.path if authz else None,
-                action_class=authz.action_class if authz else None,
-                category=authz.category if authz else None,
-                policy_version=authz.policy_version if authz else None,
-                approval_id=result.approval_id,
-                decided_by=authz.decided_by if authz else None,
-                token_jti=claims.jti if claims else None,
-                error=result.error,
-            )
+        record = ActionRecord(
+            action_id=action_id,
+            timestamp=self._clock(),
+            agent_id=session.manifest.agent_id,
+            tool=call.tool,
+            params=dict(call.params),
+            status_code=result.status_code,
+            ok=result.ok,
+            denied=result.denied,
+            fault=result.fault,
+            level=authz.level if authz else None,
+            path=authz.path if authz else None,
+            action_class=authz.action_class if authz else None,
+            category=authz.category if authz else None,
+            policy_version=authz.policy_version if authz else None,
+            approval_id=result.approval_id or (authz.approval_id if authz else None),
+            decided_by=authz.decided_by if authz else None,
+            token_jti=claims.jti if claims else None,
+            error=result.error,
+        )
+        self.action_log.append(record)
+        self.audit.record(
+            record,
+            owner=session.manifest.owner,
+            risk=authz.risk if authz else None,
+            reasoning=call.reasoning,
+            verdicts=result.guardrails.verdicts if result.guardrails else None,
+            spans=trace.spans if trace else None,
         )
