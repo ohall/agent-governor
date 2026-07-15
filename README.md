@@ -21,9 +21,15 @@ authorized?" from the trace store alone.
 | Component | Status | Purpose |
 |---|---|---|
 | `mockops` | ✅ M1 | Deterministic mock ITSM estate + controllable fault injection |
-| `agent` | ⏳ M2 | Ops-remediation agent (sim mode with dial-a-mistake-rate; live mode via Anthropic) |
-| `warden` | ⏳ M3–M5 | The governance gateway: identity, authorization, guardrails, budget loop |
+| `agent` | ✅ M2 | LangGraph ops-remediation agent, sim mode with dial-a-mistake-rate `p` (live mode later) |
+| `warden` | 🚧 M2–M5 | The governance gateway — pass-through chokepoint live (manifest scope + action log); identity, authorization, guardrails, budget loop landing next |
 | `benchmarks` | ⏳ M6 | Reproducible experiments: p^n decay, guardrail latency, demotion timeline |
+
+Try the sim agent (in-process, no server needed):
+
+```bash
+uv run python examples/m2_sim_run.py
+```
 
 ## Quickstart
 

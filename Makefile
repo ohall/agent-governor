@@ -4,12 +4,12 @@ install:
 	uv sync
 
 lint:
-	uv run ruff check src tests
-	uv run ruff format --check src tests
+	uv run ruff check src tests examples
+	uv run ruff format --check src tests examples
 
 fmt:
-	uv run ruff check --fix src tests
-	uv run ruff format src tests
+	uv run ruff check --fix src tests examples
+	uv run ruff format src tests examples
 
 typecheck:
 	uv run mypy
