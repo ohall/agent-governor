@@ -29,3 +29,4 @@ reports/out/
 .DS_Store
 .idea/
 .vscode/
+benchmarks/out/

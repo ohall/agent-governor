@@ -39,6 +39,12 @@ dev = [
     "mypy>=1.11",
     "types-pyyaml>=6.0",
 ]
+bench = [
+    "matplotlib>=3.9",
+]
+
+[tool.uv]
+default-groups = ["dev", "bench"]
 
 [build-system]
 requires = ["hatchling"]
@@ -71,7 +77,7 @@ select = [
 quote-style = "double"
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 files = ["src"]
 

@@ -1,4 +1,4 @@
-.PHONY: install lint fmt typecheck test run-mockops demo
+.PHONY: install lint fmt typecheck test run-mockops demo bench report
 
 install:
 	uv sync
@@ -21,4 +21,13 @@ run-mockops:
 	uv run mockops
 
 demo:
-	@echo "demo arrives with milestone M6 (examples/demo.py)"
+	uv run python examples/demo.py
+
+bench:
+	uv run python -m benchmarks.exp1_pn_decay
+	uv run python -m benchmarks.exp2_guardrail_latency
+	uv run python -m benchmarks.exp3_governance_timeline
+
+report:
+	uv run python -m benchmarks.make_report
+	@echo "open reports/out/index.html"

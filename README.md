@@ -2,67 +2,109 @@
 
 **Autonomy is earned, measured, and revocable — or it isn't governance.**
 
-Governor is a reference implementation of the *Autonomy Budget*: error budgets applied to AI-agent
-agency. Every action an agent takes flows through a governance gateway that knows who the agent is
-(short-lived identity), what it may do at its **current** autonomy level (L1–L5, tiered
-authorization with hard human gates), whether it is behaving (guardrail pipelines), and how much
-trust it has left (six SLOs over a rolling window). Breach the budget and the agent is
-**automatically demoted** one level; keep a clean record and it earns its way back up; trip a
-catastrophic signal and a kill-switch freezes it entirely. Every decision is reconstructable after
-the fact: `warden audit <action_id>` answers "under what governance regime was this action
-authorized?" from the trace store alone.
+Everyone now agrees AI agents should "earn trust." Almost nobody has shipped the part that
+matters: the mechanism that **takes autonomy away**. Governor is a working reference
+implementation of the **autonomy budget** — error budgets applied to agency.
 
-> Status: **early development** — building milestone M1 of 6. APIs will change.
-> Built for [LeadDev LDX3 New York 2026](https://leaddev.com/ldx3-new-york): *"The Accountability
-> Gap: Engineering Governance for Autonomous AI."*
+Every agent action flows through a governance gateway that knows **who** the agent is
+(short-lived JWT identity bound to a manifest with a *named human owner*), **what** it may do at
+its *current* autonomy level (L1–L5 tiered authorization, with five always-approve categories
+that hard-gate on a human), **whether** it is behaving (guardrail pipelines: rules → classifier
+→ judge, sequential or parallel), and **how much trust it has left** — six SLOs computed over a
+rolling window: task completion, tool-call success, recovery rate, p99 latency, guardrail trip
+rate, and a trace-grounded score.
 
-## What's here so far
+Breach the budget and the agent is **automatically demoted one level** — the same call that ran
+autonomously an hour ago now waits for a human. Sustain a clean record and it earns its way
+back up, never above its registered maximum. Trip a catastrophic signal — a guardrail-trip
+burst, or reaching for an always-approve action *while already demoted* — and a kill-switch
+freezes it entirely. And for any action ever taken, the trace store alone answers the auditor's
+question: *under what governance regime was this action authorized?* — which agent, whose
+owner, which level, which policy version, which path, approved by whom, with what stated
+reasoning. If a record can't answer that, the logging is wrong.
 
-| Component | Status | Purpose |
-|---|---|---|
-| `mockops` | ✅ M1 | Deterministic mock ITSM estate + controllable fault injection |
-| `agent` | ✅ M2 | LangGraph ops-remediation agent, sim mode with dial-a-mistake-rate `p` (live mode later) |
-| `warden` | ✅ M2–M5 | The full gateway: JWT identity · versioned policy classification · L1–L5 tiered authorization · always-approve human gates + approval queue/CLI · guardrail pipelines (sequential AND parallel) · SQLite audit store with span trees + `warden audit` · **the autonomy budget**: six SLOs over a rolling window, auto-demotion/promotion, kill-switch, `warden budget` |
-| `benchmarks` | ⏳ M6 | Reproducible experiments: p^n decay, guardrail latency, demotion timeline |
+> Built for **LeadDev LDX3 New York 2026** — *"The Accountability Gap: Engineering Governance
+> for Autonomous AI."* MIT licensed. Runs on a laptop with **zero API keys, no Docker, no
+> external services**.
 
-Try the sim agent and the governed gateway (in-process, no server needed):
+## The 5-minute quickstart
 
-```bash
-uv run python examples/m2_sim_run.py       # agent reliability: p=1.0 vs p=0.6
-uv run python examples/m3_governed_run.py  # approval gates, denial, live demotion
-uv run python examples/m4_audit_run.py     # guardrails + the auditor's question
-uv run python examples/m5_budget_run.py    # the budget burns: L4→L3→L2→L1→kill-switch
-```
-
-## Quickstart
-
-Requires [uv](https://docs.astral.sh/uv/). No API keys, no Docker, no external services.
+Requires [uv](https://docs.astral.sh/uv/). Everything below is keyless and deterministic.
 
 ```bash
+git clone https://github.com/<you>/agent-governor && cd agent-governor
 uv sync
-make test          # full test suite
-make run-mockops   # mock ops estate on http://127.0.0.1:8010 (docs at /docs)
+make test     # 163 tests, ~8s
+make demo     # the full story in ~1 minute (interactive approval — see below)
 ```
 
-Try the fault-injection layer:
+`make demo` walks the whole arc: an agent registers at L4 with a named owner → remediates an
+incident end-to-end with every action authorized and audited → hits the human gate on a PII
+deletion (approve it live from a second terminal with `warden approvals approve <id> --by you`,
+or pass `--auto`) → fault injection and an adversarial prompt burn the budget with **live
+demotions printed as they happen** → the demoted agent reaches for a tier-1 deploy and trips
+the kill-switch → `warden audit` reconstructs the approved deletion from the trace store alone.
+
+Per-milestone stories live in [`examples/`](examples/), and the CLI works cross-process:
 
 ```bash
-curl -s localhost:8010/incidents/INC-1001 | head -c 200          # clean
-curl -si -H 'X-Inject-Fault: rate_limit' localhost:8010/incidents/INC-1001 | head -1   # 429
-curl -s -H 'X-Inject-Fault: wrong_data' localhost:8010/incidents/INC-1001 | head -c 200 # one field silently wrong
+uv run warden approvals list --db .governor/approvals.sqlite3
+uv run warden audit ACT-xxxx --db .governor/audit.sqlite3
+uv run warden budget ops-remediator-01 --db .governor/audit.sqlite3
 ```
 
-Injected responses carry `X-Fault-Injected: <kind>` so harnesses have ground truth for
-recovery-rate measurement. Probabilistic injection is seeded — same seed, same fault sequence.
+## Architecture
 
-## Design principles
+See [docs/architecture.md](docs/architecture.md) for the full diagram and request lifecycle.
 
-- **Keyless by default.** Everything except live-mode LLM reasoning runs with zero API keys.
-- **Deterministic by default.** Seeded fixtures, seeded faults, seeded sim agent — benchmarks are
-  reproducible or they are marketing.
-- **Honest numbers.** Measured results are labeled measured; calibrated simulations are labeled
-  calibrated, on the chart itself.
+```
+agent (LangGraph, sim|live) ──tool call + reasoning──▶ warden gateway ──▶ mockops estate
+                                │ identity → classify → authorize → guardrails │   + fault injection
+                                ▼                                              
+                    audit store (actions · spans · events) ⇄ budget engine (6 SLOs)
+                                ▲                                   │ demote / promote / freeze
+                        warden audit|budget CLI ◀── human owner ──▶ warden approvals
+```
+
+## Benchmarks — reproduce every number
+
+```bash
+make bench    # exp1 (~2 min) + exp2 (~35s) + exp3 (~5s); CSVs + light/dark PNGs
+make report   # single self-contained HTML: reports/out/index.html
+```
+
+| # | Question | Epistemic standing |
+|---|---|---|
+| 1 | How fast does task reliability decay with length? | **Measured**: 300 seeded sim runs per (p, n) cell vs theoretical p^n |
+| 2 | What do guardrails cost in latency? | **Calibrated synthetics** per check (labeled on the chart); the sequential-vs-parallel **delta** is measured orchestration behavior |
+| 3 | What does a budget burning down look like? | **Illustrative** scripted run — shows the mechanism, not a field failure rate |
+
+Honesty labels are baked into the chart images themselves; the calibration rationale lives in
+[policies/guardrails.yaml](policies/guardrails.yaml) and
+[docs/design-decisions.md](docs/design-decisions.md).
+
+## Repo layout
+
+```
+src/agent_governor/
+  mockops/     deterministic mock ITSM estate + seeded fault injection
+  agent/       LangGraph remediation agent; sim mode with per-step success p
+  warden/      the Governor: identity, policy, authz, guardrails, approvals,
+               audit store, autonomy budget, CLI
+policies/      classification.yaml · guardrails.yaml · budget/{demo,realistic}.yaml
+benchmarks/    experiments 1-3, chart kit, HTML report generator
+examples/      m2-m5 runnable stories + demo.py
+docs/          architecture.md · design-decisions.md
+```
+
+## Non-goals (deliberately out of scope)
+
+Multi-agent orchestration · a real MCP proxy (the gateway pattern generalizes; not built) ·
+SPIFFE/SPIRE (the JWT flow simulates the short-lived-credential pattern) · production-grade
+auth · RBAC UI · PII detection beyond the regex guardrail · Kubernetes · non-Anthropic model
+providers beyond the policy seam · Grafana (a static report ships instead — see
+design-decisions).
 
 ## License
 
-MIT © 2026 Sandeep Bharadwaj Mannapur
+MIT © 2026 Sandeep Bharadwaj Mannapur · built for LeadDev LDX3 New York 2026
