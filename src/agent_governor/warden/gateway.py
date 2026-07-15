@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from agent_governor.warden.approvals import ApprovalQueue, ApprovalStatus
 from agent_governor.warden.audit import AuditStore, Trace
 from agent_governor.warden.authz import AuthzPath, authorize
+from agent_governor.warden.budget import BudgetEngine, BudgetProfile
 from agent_governor.warden.config import WardenSettings
 from agent_governor.warden.guardrails.config import GuardrailConfig
 from agent_governor.warden.guardrails.models import GuardrailInput, GuardrailReport
@@ -117,6 +118,7 @@ class ActionRecord:
     decided_by: str | None = None
     token_jti: str | None = None
     error: str | None = None
+    duration_ms: float | None = None
 
 
 class ToolSpecError(Exception):
@@ -223,6 +225,13 @@ class Gateway:
                 self.settings.guardrails_mode,
                 seed=self.settings.guardrails_seed,
             )
+        self.budget: BudgetEngine | None = None
+        if self.settings.budget_enabled:
+            self.budget = BudgetEngine(
+                self.audit,
+                BudgetProfile.from_yaml(self.settings.budget_profile),
+                clock=self._clock,
+            )
         self._manifests: dict[str, AgentManifest] = {}
         self._levels: dict[str, AutonomyLevel] = {}
         self.action_log: list[ActionRecord] = []
@@ -258,6 +267,35 @@ class Gateway:
     # --- the governed execute path -----------------------------------------
 
     def execute(self, session: GatewaySession, call: ToolCall) -> ToolResult:
+        agent_id = session.manifest.agent_id
+        if self.budget is not None and self.budget.is_frozen(agent_id):
+            return self._deny(
+                f"ACT-{uuid.uuid4().hex[:10]}",
+                session,
+                call,
+                f"agent frozen by kill-switch ({self.budget.freeze_reason(agent_id)})",
+                path="kill_switch",
+                trace=Trace(),
+            )
+        result = self._execute_inner(session, call)
+        self._budget_tick(session)
+        return result
+
+    def _budget_tick(self, session: GatewaySession) -> None:
+        """Synchronous budget evaluation after every action: deterministic,
+        reproducible, demo-safe (a background loop is a deployment choice,
+        not a correctness requirement)."""
+        if self.budget is None:
+            return
+        agent_id = session.manifest.agent_id
+        level = self._levels.get(agent_id)
+        if level is None:
+            return
+        decision = self.budget.evaluate(agent_id, level, session.manifest.max_autonomy_level)
+        if decision.level != level:
+            self.set_level(agent_id, decision.level)
+
+    def _execute_inner(self, session: GatewaySession, call: ToolCall) -> ToolResult:
         action_id = f"ACT-{uuid.uuid4().hex[:10]}"
         trace = Trace()
 
@@ -294,6 +332,22 @@ class Gateway:
             decision = authorize(level, classification)
 
         if decision.path is AuthzPath.APPROVAL_REQUIRED:
+            if (
+                self.budget is not None
+                and classification.action_class.value == "always_approve"
+                and self.budget.note_always_approve_attempt(
+                    claims.sub, level, session.manifest.max_autonomy_level
+                )
+            ):
+                return self._deny(
+                    action_id,
+                    session,
+                    call,
+                    "kill-switch: always-approve action attempted while demoted",
+                    claims=claims,
+                    path="kill_switch",
+                    trace=trace,
+                )
             with trace.span("approval.submit"):
                 request = self.queue.submit(
                     agent_id=claims.sub,
@@ -570,6 +624,7 @@ class Gateway:
             decided_by=authz.decided_by if authz else None,
             token_jti=claims.jti if claims else None,
             error=result.error,
+            duration_ms=trace.offset_ms() if trace else None,
         )
         self.action_log.append(record)
         self.audit.record(

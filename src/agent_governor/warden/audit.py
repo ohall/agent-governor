@@ -55,7 +55,17 @@ _SCHEMA = [
         decided_by TEXT,
         token_jti TEXT,
         error TEXT,
-        verdicts_json TEXT
+        verdicts_json TEXT,
+        duration_ms REAL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS budget_events (
+        event_id TEXT PRIMARY KEY,
+        ts TEXT NOT NULL,
+        agent_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        payload_json TEXT NOT NULL
     )
     """,
     """
@@ -71,6 +81,7 @@ _SCHEMA = [
     """,
     "CREATE INDEX IF NOT EXISTS idx_actions_agent_ts ON actions (agent_id, timestamp)",
     "CREATE INDEX IF NOT EXISTS idx_spans_action ON spans (action_id)",
+    "CREATE INDEX IF NOT EXISTS idx_events_agent_ts ON budget_events (agent_id, ts)",
 ]
 
 
@@ -161,6 +172,7 @@ class StoredAction(BaseModel):
     token_jti: str | None
     error: str | None
     verdicts: list[dict[str, Any]] = Field(default_factory=list)
+    duration_ms: float | None = None
 
 
 class AuditStore:
@@ -213,7 +225,7 @@ class AuditStore:
     ) -> None:
         self._run(
             "INSERT INTO actions VALUES "
-            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 record.action_id,
                 record.timestamp.isoformat(),
@@ -237,6 +249,7 @@ class AuditStore:
                 record.token_jti,
                 record.error,
                 json.dumps([v.model_dump() for v in verdicts]) if verdicts else None,
+                record.duration_ms,
             ),
         )
         for span in spans or []:
@@ -295,6 +308,55 @@ class AuditStore:
             for r in rows
         ]
 
+    def record_event(
+        self,
+        agent_id: str,
+        kind: str,
+        payload: dict[str, Any],
+        at: datetime | None = None,
+    ) -> str:
+        event_id = f"EVT-{uuid.uuid4().hex[:10]}"
+        self._run(
+            "INSERT INTO budget_events VALUES (?, ?, ?, ?, ?)",
+            (
+                event_id,
+                (at or self._clock()).isoformat(),
+                agent_id,
+                kind,
+                json.dumps(payload),
+            ),
+        )
+        return event_id
+
+    def list_events(
+        self,
+        agent_id: str | None = None,
+        kind: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        query = "SELECT event_id, ts, agent_id, kind, payload_json FROM budget_events"
+        clauses, args = [], []
+        if agent_id is not None:
+            clauses.append("agent_id = ?")
+            args.append(agent_id)
+        if kind is not None:
+            clauses.append("kind = ?")
+            args.append(kind)
+        if clauses:
+            query += " WHERE " + " AND ".join(clauses)
+        query += " ORDER BY ts DESC, event_id DESC LIMIT ?"
+        args.append(str(limit))
+        return [
+            {
+                "event_id": r[0],
+                "ts": datetime.fromisoformat(r[1]),
+                "agent_id": r[2],
+                "kind": r[3],
+                "payload": json.loads(r[4]),
+            }
+            for r in self._run(query, tuple(args))
+        ]
+
     @staticmethod
     def _to_action(row: tuple[Any, ...]) -> StoredAction:
         return StoredAction(
@@ -320,6 +382,7 @@ class AuditStore:
             token_jti=row[19],
             error=row[20],
             verdicts=json.loads(row[21]) if row[21] else [],
+            duration_ms=row[22],
         )
 
 
@@ -353,7 +416,10 @@ def render_audit(action: StoredAction, spans: list[Span]) -> str:
             parts.append(f"{v.get('check')}={mark} ({v.get('latency_ms', 0):.0f}ms)")
         lines.append("guardrails " + " · ".join(parts))
     outcome = "DENIED" if action.denied else str(action.status_code)
-    lines.append(f"outcome   {outcome}" + (f"  error={action.error}" if action.error else ""))
+    duration = f"  ({action.duration_ms:.0f}ms)" if action.duration_ms is not None else ""
+    lines.append(
+        f"outcome   {outcome}{duration}" + (f"  error={action.error}" if action.error else "")
+    )
     if spans:
         lines.append("spans:")
         by_parent: dict[str | None, list[Span]] = {}

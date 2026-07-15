@@ -22,7 +22,7 @@ authorized?" from the trace store alone.
 |---|---|---|
 | `mockops` | ✅ M1 | Deterministic mock ITSM estate + controllable fault injection |
 | `agent` | ✅ M2 | LangGraph ops-remediation agent, sim mode with dial-a-mistake-rate `p` (live mode later) |
-| `warden` | 🚧 M4 of M2–M5 | JWT identity · versioned policy classification · L1–L5 tiered authorization · always-approve human gates + approval queue/CLI · guardrail pipelines (rules/classifier/judge, sequential AND parallel) · SQLite audit store with span trees · `warden audit` answers the auditor's question. Budget loop (M5) next |
+| `warden` | ✅ M2–M5 | The full gateway: JWT identity · versioned policy classification · L1–L5 tiered authorization · always-approve human gates + approval queue/CLI · guardrail pipelines (sequential AND parallel) · SQLite audit store with span trees + `warden audit` · **the autonomy budget**: six SLOs over a rolling window, auto-demotion/promotion, kill-switch, `warden budget` |
 | `benchmarks` | ⏳ M6 | Reproducible experiments: p^n decay, guardrail latency, demotion timeline |
 
 Try the sim agent and the governed gateway (in-process, no server needed):
@@ -31,6 +31,7 @@ Try the sim agent and the governed gateway (in-process, no server needed):
 uv run python examples/m2_sim_run.py       # agent reliability: p=1.0 vs p=0.6
 uv run python examples/m3_governed_run.py  # approval gates, denial, live demotion
 uv run python examples/m4_audit_run.py     # guardrails + the auditor's question
+uv run python examples/m5_budget_run.py    # the budget burns: L4→L3→L2→L1→kill-switch
 ```
 
 ## Quickstart

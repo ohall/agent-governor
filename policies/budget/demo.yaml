@@ -1,0 +1,30 @@
+# Autonomy-budget profile: DEMO.
+#
+# ⚠️ THRESHOLDS COMPRESSED FOR DEMONSTRATION. A real deployment uses
+# policies/budget/realistic.yaml (200 actions / 24h). These values exist so
+# a live audience can watch L4 -> L3 -> L2 -> kill-switch inside three
+# minutes; every run banner prints which profile is active.
+
+name: demo
+note: "thresholds compressed for demonstration — not production values"
+
+window:
+  max_actions: 30
+  max_age_s: 3600
+
+min_actions: 6
+breach_threshold: 1
+cooldown_actions: 4
+promotion_streak: 6
+
+kill_switch:
+  trip_count: 3
+  trip_window_s: 300
+
+targets:
+  task_completion: 0.70
+  tool_call_success: 0.90
+  recovery_rate: 0.60
+  p99_latency_ms: 2000
+  guardrail_trip_rate: 0.10
+  trace_grounded: 0.60

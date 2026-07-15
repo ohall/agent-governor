@@ -44,3 +44,9 @@ class WardenSettings(BaseSettings):
     )
     guardrails_path: str = "policies/guardrails.yaml"
     guardrails_seed: int = 42
+    budget_enabled: bool = Field(
+        default=False,
+        description="Enable the autonomy-budget loop (synchronous per-action "
+        "evaluation). Off by default; the demo and Experiment 3 enable it.",
+    )
+    budget_profile: str = "policies/budget/realistic.yaml"

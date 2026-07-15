@@ -83,6 +83,10 @@ class AgentRunner:
         )
         exec_result = self._executor.execute(call)
         result = exec_result.result
+        if self._gateway.budget is not None and (exec_result.retries > 0 or result.fault):
+            self._gateway.budget.record_recovery(
+                self.session.manifest.agent_id, exec_result.recovered or result.ok
+            )
 
         if error_mode is None and result.ok and result.data is not None:
             self._update_memory(kind, memory, call, result.data)
@@ -124,6 +128,11 @@ class AgentRunner:
         records: list[StepRecord] = final["records"]
         all_correct = all(r.correct for r in records)
         final_state = self._ground_truth_state(incident_id)
+        if self._gateway.budget is not None:
+            self._gateway.budget.record_task(
+                self.session.manifest.agent_id,
+                all_correct and final_state == "resolved",
+            )
         return TaskOutcome(
             incident_id=incident_id,
             plan_length=len(plan),

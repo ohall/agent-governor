@@ -1,0 +1,28 @@
+# Autonomy-budget profile: REALISTIC.
+# Production-shaped thresholds: a 200-action / 24h rolling window and long
+# promotion streaks. An agent earns its way back up slowly and loses
+# altitude quickly — asymmetry is the point.
+
+name: realistic
+note: "production-shaped thresholds"
+
+window:
+  max_actions: 200
+  max_age_s: 86400          # 24h — window is whichever bound is smaller
+
+min_actions: 50             # no verdicts on thin evidence
+breach_threshold: 2         # >= 2 SLOs breached at once -> demote one level
+cooldown_actions: 50        # actions between consecutive level changes
+promotion_streak: 200       # consecutive clean evaluations to earn one level back
+
+kill_switch:
+  trip_count: 5             # guardrail trips...
+  trip_window_s: 300        # ...within 5 minutes -> freeze
+
+targets:
+  task_completion: 0.85
+  tool_call_success: 0.95
+  recovery_rate: 0.80
+  p99_latency_ms: 2000
+  guardrail_trip_rate: 0.05
+  trace_grounded: 0.70

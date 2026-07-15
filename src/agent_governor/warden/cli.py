@@ -108,5 +108,50 @@ def actions(
         )
 
 
+@app.command("budget")
+def budget(
+    agent_id: str,
+    events: int = typer.Option(8, help="How many recent budget events to show."),
+    db: str = typer.Option(DEFAULT_AUDIT_DB, help="Path to the audit SQLite database."),
+) -> None:
+    """Show an agent's current autonomy-budget state and recent level changes."""
+    store = AuditStore(db)
+    snapshots = store.list_events(agent_id=agent_id, kind="snapshot", limit=1)
+    if not snapshots:
+        typer.echo(f"no budget snapshots for {agent_id!r} in {db}")
+        raise typer.Exit(code=1)
+    latest = snapshots[0]
+    payload = latest["payload"]
+    snap = payload.get("snapshot", {})
+    typer.echo(
+        f"agent {agent_id}  level=L{payload.get('level')}  "
+        f"frozen={payload.get('frozen')}  profile={payload.get('profile')}  "
+        f"as_of={latest['ts'].strftime('%H:%M:%S')}"
+    )
+    dims = (
+        "task_completion",
+        "tool_call_success",
+        "recovery_rate",
+        "p99_latency_ms",
+        "guardrail_trip_rate",
+        "trace_grounded",
+    )
+    breaches = set(snap.get("breaches", []))
+    for dim in dims:
+        value = snap.get(dim)
+        shown = "-" if value is None else f"{value:g}"
+        flag = "  BREACH" if any(b.startswith(dim) for b in breaches) else ""
+        typer.echo(f"  {dim:<20} {shown}{flag}")
+    changes = [
+        e
+        for e in store.list_events(agent_id=agent_id, limit=200)
+        if e["kind"] in {"demotion", "promotion", "kill_switch", "unfreeze"}
+    ][:events]
+    if changes:
+        typer.echo("recent level events:")
+        for e in changes:
+            typer.echo(f"  {e['ts'].strftime('%H:%M:%S')}  {e['kind']:<12} {e['payload']}")
+
+
 if __name__ == "__main__":
     app()
