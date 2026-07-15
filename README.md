@@ -22,13 +22,14 @@ authorized?" from the trace store alone.
 |---|---|---|
 | `mockops` | ✅ M1 | Deterministic mock ITSM estate + controllable fault injection |
 | `agent` | ✅ M2 | LangGraph ops-remediation agent, sim mode with dial-a-mistake-rate `p` (live mode later) |
-| `warden` | 🚧 M2–M5 | The governance gateway — pass-through chokepoint live (manifest scope + action log); identity, authorization, guardrails, budget loop landing next |
+| `warden` | 🚧 M3 of M2–M5 | The gateway now enforces: 10-min JWT identity (expiry/over-scope denial + auto-refresh), versioned YAML policy classification, L1–L5 tiered authorization, five always-approve human gates, SQLite approval queue + `warden approvals` CLI. Guardrails (M4) and the budget loop (M5) next |
 | `benchmarks` | ⏳ M6 | Reproducible experiments: p^n decay, guardrail latency, demotion timeline |
 
-Try the sim agent (in-process, no server needed):
+Try the sim agent and the governed gateway (in-process, no server needed):
 
 ```bash
-uv run python examples/m2_sim_run.py
+uv run python examples/m2_sim_run.py       # agent reliability: p=1.0 vs p=0.6
+uv run python examples/m3_governed_run.py  # approval gates, denial, live demotion
 ```
 
 ## Quickstart

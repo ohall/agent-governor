@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from agent_governor.agent.models import SimConfig, TaskOutcome
-from agent_governor.agent.runner import AgentRunner
+from agent_governor.agent.runner import BENCHMARK_MANIFEST, AgentRunner
 from agent_governor.mockops.app import create_app
 from agent_governor.mockops.config import MockOpsSettings
 from agent_governor.warden.gateway import Gateway, ToolCall
@@ -33,11 +33,13 @@ def main() -> None:
     client = TestClient(create_app(MockOpsSettings(seed=42)))
     gateway = Gateway(client)
 
-    flawless = AgentRunner(gateway, SimConfig(p=1.0, seed=1, plan_length=6))
+    # benchmark manifest (L5): this example demonstrates agent RELIABILITY;
+    # examples/m3_governed_run.py demonstrates governance at L4.
+    flawless = AgentRunner(gateway, SimConfig(p=1.0, seed=1, plan_length=6), BENCHMARK_MANIFEST)
     print_outcome("Flawless agent (p=1.0) on INC-1001", flawless.run("INC-1001"))
 
     client.post("/admin/reset")
-    sloppy = AgentRunner(gateway, SimConfig(p=0.6, seed=9, plan_length=6))
+    sloppy = AgentRunner(gateway, SimConfig(p=0.6, seed=9, plan_length=6), BENCHMARK_MANIFEST)
     print_outcome("Sloppy agent (p=0.6) on INC-1001", sloppy.run("INC-1001"))
 
     print(f"\ngateway action log: {len(gateway.action_log)} actions recorded")

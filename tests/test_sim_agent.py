@@ -5,15 +5,17 @@ from fastapi.testclient import TestClient
 
 from agent_governor.agent.models import ErrorMode, SimConfig, StepKind
 from agent_governor.agent.policy import SimPolicy, build_plan, bump_version
-from agent_governor.agent.runner import AgentRunner
+from agent_governor.agent.runner import BENCHMARK_MANIFEST, AgentRunner
 from agent_governor.mockops.app import create_app
 from agent_governor.mockops.config import MockOpsSettings
 from agent_governor.warden.gateway import Gateway
 
 
 def make_runner(config: SimConfig) -> tuple[AgentRunner, TestClient]:
+    """Benchmark-manifest runner (L5): these tests measure agent reliability,
+    so governance approval pauses must not interfere."""
     client = TestClient(create_app(MockOpsSettings(seed=42)))
-    return AgentRunner(Gateway(client), config), client
+    return AgentRunner(Gateway(client), config, manifest=BENCHMARK_MANIFEST), client
 
 
 class TestPlanConstruction:

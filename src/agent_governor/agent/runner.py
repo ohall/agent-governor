@@ -44,6 +44,16 @@ DEFAULT_MANIFEST = AgentManifest(
 # Note: delete_records and change_privileges are deliberately absent — the
 # manifest is the OUTER boundary; even a fully-trusted agent can't reach them.
 
+BENCHMARK_MANIFEST = DEFAULT_MANIFEST.model_copy(
+    update={
+        "agent_id": "ops-remediator-bench",
+        "max_autonomy_level": AutonomyLevel.L5_OBSERVER,
+    }
+)
+# L5 exists here ONLY because reliability benchmarks (p^n) measure the agent,
+# not governance friction: approval pauses would corrupt the measurement.
+# L5 is never a production default — see AutonomyLevel.L5_OBSERVER.
+
 
 class AgentRunner:
     """Runs remediation tasks in sim mode through the governance gateway."""

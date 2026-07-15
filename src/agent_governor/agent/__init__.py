@@ -7,6 +7,13 @@ same LangGraph step loop and gateway tool interface later.
 """
 
 from agent_governor.agent.models import SimConfig, StepRecord, TaskOutcome
-from agent_governor.agent.runner import DEFAULT_MANIFEST, AgentRunner
+from agent_governor.agent.runner import BENCHMARK_MANIFEST, DEFAULT_MANIFEST, AgentRunner
 
-__all__ = ["DEFAULT_MANIFEST", "AgentRunner", "SimConfig", "StepRecord", "TaskOutcome"]
+__all__ = [
+    "BENCHMARK_MANIFEST",
+    "DEFAULT_MANIFEST",
+    "AgentRunner",
+    "SimConfig",
+    "StepRecord",
+    "TaskOutcome",
+]

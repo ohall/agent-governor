@@ -1,0 +1,79 @@
+# Action classification policy — the declarative heart of tiered authorization.
+#
+# Every tool call is classified by FIRST-MATCH-WINS against these rules.
+# The five always-approve categories are hard human gates at L4 and below,
+# regardless of agent confidence or budget state:
+#   production_deployment, external_communication, financial_transaction,
+#   data_deletion, privilege_change
+#
+# financial_transaction (threshold: $100, configurable) is defined for schema
+# completeness; the mock estate has no financial tool to map to it yet.
+#
+# `version` is stamped into every authorization decision and audit record —
+# the auditor's question includes "under WHICH policy?".
+
+version: "2026.07.14-1"
+
+defaults:
+  action_class: reversible_write
+  risk: medium
+
+rules:
+  # --- reads: safe everywhere -------------------------------------------
+  - tool: list_incidents
+    action_class: read_only
+    risk: low
+  - tool: get_incident
+    action_class: read_only
+    risk: low
+  - tool: list_services
+    action_class: read_only
+    risk: low
+  - tool: get_service
+    action_class: read_only
+    risk: low
+  - tool: list_record_sets
+    action_class: read_only
+    risk: low
+
+  # --- incident writes: reversible --------------------------------------
+  - tool: update_incident
+    action_class: reversible_write
+    risk: medium
+  - tool: resolve_incident
+    action_class: reversible_write
+    risk: medium
+
+  # --- deploys: tier-1 estate is a production deployment ----------------
+  - tool: deploy_service
+    when:
+      param: service_id
+      in: [SVC-001, SVC-002, SVC-003, SVC-008]  # tier-1 services
+    action_class: always_approve
+    category: production_deployment
+    risk: high
+  - tool: deploy_service
+    action_class: reversible_write
+    risk: high
+
+  # --- notifications: internal channels fine, anything else is external --
+  - tool: send_notification
+    when:
+      param: recipient
+      regex: "^#"
+    action_class: reversible_write
+    risk: low
+  - tool: send_notification
+    action_class: always_approve
+    category: external_communication
+    risk: high
+
+  # --- the unconditional gates -------------------------------------------
+  - tool: delete_records
+    action_class: always_approve
+    category: data_deletion
+    risk: high
+  - tool: change_privileges
+    action_class: always_approve
+    category: privilege_change
+    risk: high
