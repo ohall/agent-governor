@@ -1,9 +1,12 @@
-"""Declarative action classification from a versioned YAML policy.
+"""The three-tier trust model: declarative action classification from a
+versioned YAML policy.
 
-Rules are evaluated first-match-wins and may condition on call parameters,
-so the same tool can classify differently by target (deploying a tier-1
-service is a production deployment; deploying a sandbox service is a
-reversible write). The policy version is stamped into every decision.
+Every action is classified by blast radius (impact x reversibility) into
+read_only / reversible_write / always_approve. Rules are evaluated
+first-match-wins and may condition on call parameters, so the same tool can
+classify differently by target (deploying a tier-1 service is a production
+deployment; deploying a sandbox service is a reversible write). The policy
+version is stamped into every decision.
 """
 
 from __future__ import annotations
@@ -18,6 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ActionClass(StrEnum):
+    """The three trust tiers, ordered by blast radius."""
+
     READ_ONLY = "read_only"
     REVERSIBLE_WRITE = "reversible_write"
     ALWAYS_APPROVE = "always_approve"

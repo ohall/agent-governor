@@ -24,6 +24,16 @@ chart itself so the caveat cannot drift away from the artifact:
 3. **Exp 3 (governance timeline): illustrative.** A scripted fault schedule
    showing the enforcement mechanism. Never quote it as a field failure rate.
 
+## OpenTelemetry: SQLite is truth, OTel is interop
+
+The SQLite trace store is the source of truth (`warden audit` must work on a
+laptop with zero infrastructure). OTel export (`warden/otel.py`) mirrors
+every action into real spans — GenAI semantic conventions plus `governor.*`
+authorization attributes — to the console or any OTLP endpoint, because the
+observability promise only lands when the trail appears in the backend your
+org already trusts. OTLP transport is an extra (`agent-governor[otlp]`) to
+keep the default install lean.
+
 ## Static HTML report instead of Grafana
 
 A conference demo and a GitHub reviewer share one need: zero-setup results.

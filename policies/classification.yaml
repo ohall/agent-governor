@@ -1,6 +1,10 @@
-# Action classification policy — the declarative heart of tiered authorization.
+# Action classification policy — THE THREE-TIER TRUST MODEL.
 #
-# Every tool call is classified by FIRST-MATCH-WINS against these rules.
+# Every tool call is classified by blast radius (impact x reversibility)
+# into one of three tiers — read_only / reversible_write / always_approve —
+# by FIRST-MATCH-WINS against these rules. Classification conditions on the
+# TARGET, not just the verb: deploying a sandbox service is a reversible
+# write; the same tool against a tier-1 service is a production deployment.
 # The five always-approve categories are hard human gates at L4 and below,
 # regardless of agent confidence or budget state:
 #   production_deployment, external_communication, financial_transaction,

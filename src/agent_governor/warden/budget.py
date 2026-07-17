@@ -4,8 +4,9 @@ Six SLOs are computed over a rolling window (max_actions or max_age,
 whichever is smaller). Breaching the profile's threshold demotes the agent
 one level; a sustained clean streak earns one level back (never above the
 manifest maximum). Catastrophic signals — a guardrail-trip burst, or an
-always-approve attempt while already demoted — trip the kill-switch and
-freeze the agent entirely.
+always-approve attempt while already demoted — trip the CIRCUIT BREAKER
+(the kill-switch): the agent is frozen entirely, every subsequent call
+denied, the event recorded, the owner notified.
 
 Evaluation is a synchronous tick after each gateway action: deterministic,
 reproducible, demo-safe. Every level change and snapshot is persisted to

@@ -7,18 +7,20 @@ matters: the mechanism that **takes autonomy away**. Governor is a working refer
 implementation of the **autonomy budget** — error budgets applied to agency.
 
 Every agent action flows through a governance gateway that knows **who** the agent is
-(short-lived JWT identity bound to a manifest with a *named human owner*), **what** it may do at
-its *current* autonomy level (L1–L5 tiered authorization, with five always-approve categories
-that hard-gate on a human), **whether** it is behaving (guardrail pipelines: rules → classifier
-→ judge, sequential or parallel), and **how much trust it has left** — six SLOs computed over a
-rolling window: task completion, tool-call success, recovery rate, p99 latency, guardrail trip
-rate, and a trace-grounded score.
+(short-lived JWT identity bound to a manifest with a *named human owner*), **what** it may do —
+a **three-tier trust model** classifies every action by **blast radius** (read-only /
+reversible-write / always-approve, conditioned on the target), crossed with the agent's
+*current* L1–L5 autonomy level into an automation-vs-human-approval decision matrix, with five
+always-approve categories that hard-gate on a human — **whether** it is behaving (guardrail
+pipelines: rules → classifier → judge, sequential or parallel), and **how much trust it has
+left** — six SLOs computed over a rolling window: task completion, tool-call success, recovery
+rate, p99 latency, guardrail trip rate, and a trace-grounded score.
 
 Breach the budget and the agent is **automatically demoted one level** — the same call that ran
 autonomously an hour ago now waits for a human. Sustain a clean record and it earns its way
 back up, never above its registered maximum. Trip a catastrophic signal — a guardrail-trip
-burst, or reaching for an always-approve action *while already demoted* — and a kill-switch
-freezes it entirely. And for any action ever taken, the trace store alone answers the auditor's
+burst, or reaching for an always-approve action *while already demoted* — and a **circuit
+breaker** freezes it entirely. And for any action ever taken, the trace store alone answers the auditor's
 question: *under what governance regime was this action authorized?* — which agent, whose
 owner, which level, which policy version, which path, approved by whom, with what stated
 reasoning. If a record can't answer that, the logging is wrong.
@@ -66,6 +68,15 @@ agent (LangGraph, sim|live) ──tool call + reasoning──▶ warden gateway 
                         warden audit|budget CLI ◀── human owner ──▶ warden approvals
 ```
 
+## Observability
+
+Every stage of every action emits a span; span names follow OpenTelemetry GenAI semantic
+conventions, persist to the SQLite trace store (the source of truth for `warden audit`), and —
+with `WARDEN_OTEL_ENABLED=1` — export as real OTel span trees (console by default,
+`WARDEN_OTEL_ENDPOINT=http://host:4318` for OTLP via the `otlp` extra). Root spans carry the
+full authorization story as `governor.*` attributes, so the audit trail lands in whatever
+tracing backend your legal and security teams already trust.
+
 ## Benchmarks — reproduce every number
 
 ```bash
@@ -94,7 +105,7 @@ src/agent_governor/
 policies/      classification.yaml · guardrails.yaml · budget/{demo,realistic}.yaml
 benchmarks/    experiments 1-3, chart kit, HTML report generator
 examples/      m2-m5 runnable stories + demo.py
-docs/          architecture.md · design-decisions.md
+docs/          architecture.md · design-decisions.md · stakeholder-briefing.md
 ```
 
 ## Non-goals (deliberately out of scope)

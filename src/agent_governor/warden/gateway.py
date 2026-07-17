@@ -225,6 +225,11 @@ class Gateway:
                 self.settings.guardrails_mode,
                 seed=self.settings.guardrails_seed,
             )
+        self.otel: Any = None
+        if self.settings.otel_enabled:
+            from agent_governor.warden.otel import OtelBridge, build_exporter
+
+            self.otel = OtelBridge(build_exporter(self.settings.otel_endpoint))
         self.budget: BudgetEngine | None = None
         if self.settings.budget_enabled:
             self.budget = BudgetEngine(
@@ -635,3 +640,5 @@ class Gateway:
             verdicts=result.guardrails.verdicts if result.guardrails else None,
             spans=trace.spans if trace else None,
         )
+        if self.otel is not None:
+            self.otel.export_action(record, trace.spans if trace else [], session.manifest.owner)

@@ -50,3 +50,12 @@ class WardenSettings(BaseSettings):
         "evaluation). Off by default; the demo and Experiment 3 enable it.",
     )
     budget_profile: str = "policies/budget/realistic.yaml"
+    otel_enabled: bool = Field(
+        default=False,
+        description="Export every governed action as a real OpenTelemetry span tree.",
+    )
+    otel_endpoint: str | None = Field(
+        default=None,
+        description="OTLP/HTTP endpoint (e.g. http://localhost:4318). None = console "
+        "exporter. Requires the 'otlp' extra for a real endpoint.",
+    )

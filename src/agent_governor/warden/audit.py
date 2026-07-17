@@ -8,8 +8,8 @@ authorization path, approved by whom, with which guardrail verdicts and
 reasoning context. `warden audit <action_id>` renders that answer.
 
 Span attribute names follow OpenTelemetry GenAI semantic conventions where
-they map cleanly (gen_ai.agent.id, gen_ai.tool.name); OTLP export is a
-documented seam, not a dependency.
+they map cleanly (gen_ai.agent.id, gen_ai.tool.name). Real OTel export —
+console or OTLP — lives in warden/otel.py (WARDEN_OTEL_ENABLED=1).
 """
 
 from __future__ import annotations

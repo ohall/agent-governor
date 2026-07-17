@@ -1,4 +1,5 @@
-"""Tiered authorization: the L1-L5 x classification decision matrix.
+"""Tiered authorization: the automation-vs-human-approval DECISION MATRIX —
+agent autonomy level (L1-L5) x action trust tier (the three-tier model).
 
 The matrix is the enforcement core of graduated autonomy:
 

@@ -45,12 +45,12 @@ flowchart LR
 
 1. **identity.validate** — the session JWT (10-minute TTL, scoped to the
    manifest) is checked; expired or over-scope calls are denied and audited.
-2. **policy.classify** — first-match-wins YAML rules classify the action
-   (read_only / reversible_write / always_approve + risk), conditioned on
-   parameters (a tier-1 deploy ≠ a sandbox deploy). The policy version is
-   stamped into the decision.
-3. **authz.decide** — the L1–L5 matrix maps (current level × classification)
-   to `auto` or `approval_required`. The five always-approve categories
+2. **policy.classify** — the three-tier trust model: first-match-wins YAML
+   rules classify the action by blast radius (read_only / reversible_write /
+   always_approve + risk), conditioned on parameters (a tier-1 deploy ≠ a
+   sandbox deploy). The policy version is stamped into the decision.
+3. **authz.decide** — the decision matrix maps (current L1–L5 level × trust
+   tier) to `auto` or `approval_required`. The five always-approve categories
    (production deploys, external comms, financial transactions, data
    deletion, privilege changes) gate at L4 and below, always.
 4. **guardrails** — on the auto path, three checks (regex rules, keyword
