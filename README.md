@@ -36,7 +36,7 @@ Requires [uv](https://docs.astral.sh/uv/). Everything below is keyless and deter
 ```bash
 git clone https://github.com/<you>/agent-governor && cd agent-governor
 uv sync
-make test     # 163 tests, ~8s
+make test     # 168 tests, ~10s
 make demo     # the full story in ~1 minute (interactive approval — see below)
 ```
 
