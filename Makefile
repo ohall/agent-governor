@@ -21,7 +21,7 @@ run-mockops:
 	uv run mockops
 
 demo:
-	uv run python examples/demo.py
+	uv run python examples/demo.py --pace 1.0
 
 bench:
 	uv run python -m benchmarks.exp1_pn_decay

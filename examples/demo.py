@@ -1,7 +1,9 @@
 """THE demo: the full governance story in under three minutes.
 
-    make demo                      # interactive: approve from a second terminal
+    make demo                               # interactive: approve from a second terminal
     uv run python examples/demo.py --auto   # self-approving (CI / screen test)
+    uv run python examples/demo.py --auto --pace        # presentation timing (~2 min)
+    uv run python examples/demo.py --auto --pace 1.3    # slower still
 
 Acts:
   1. register an agent at L4 with a named human owner
@@ -14,6 +16,7 @@ Acts:
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 import threading
@@ -34,20 +37,72 @@ GOV_DIR = Path(".governor")
 APPROVALS_DB = str(GOV_DIR / "approvals.sqlite3")
 AUDIT_DB = str(GOV_DIR / "audit.sqlite3")
 
+# ── zero-dependency terminal styling ─────────────────────────────────────────
+
+COLOR = (sys.stdout.isatty() or bool(os.environ.get("FORCE_COLOR"))) and not os.environ.get(
+    "NO_COLOR"
+)
+
+RESET = "\033[0m"
+BOLD = "\033[1m"
+DIM = "\033[2m"
+RED = "\033[31m"
+GREEN = "\033[32m"
+YELLOW = "\033[33m"
+MAGENTA = "\033[35m"
+CYAN = "\033[36m"
+
+
+def paint(text: str, *codes: str) -> str:
+    if not COLOR or not codes:
+        return text
+    return f"{''.join(codes)}{text}{RESET}"
+
+
+# ── presentation pacing (0 = instant, for CI; --pace ≈ a two-minute run) ─────
+
+PACE = 0.0
+
+
+def hold(seconds: float) -> None:
+    if PACE > 0:
+        time.sleep(seconds * PACE)
+
 
 def banner(text: str) -> None:
-    print(f"\n{'─' * 72}\n{text}\n{'─' * 72}")
+    hold(1.2)
+    rule = paint("─" * 72, DIM, CYAN)
+    print(f"\n{rule}\n{paint(text, BOLD, CYAN)}\n{rule}")
+    hold(1.3)
 
 
 def show(result: ToolResult, label: str) -> None:
     authz = result.authz
-    status = "PENDING" if result.pending else ("DENIED" if result.denied else result.status_code)
+    if result.pending:
+        status = paint("PENDING", BOLD, YELLOW)
+    elif result.denied:
+        status = paint("DENIED", BOLD, RED)
+    elif result.ok:
+        status = paint(str(result.status_code), BOLD, GREEN)
+    else:
+        status = paint(str(result.status_code), BOLD, RED)
     line = f"  {label:<42} -> {status}"
     if authz:
-        line += f"  [path={authz.path} class={authz.action_class or '-'} L{authz.level}]"
+        meta = f"  [path={authz.path} class={authz.action_class or '-'} L{authz.level}]"
+        line += paint(meta, DIM)
     print(line)
     if result.error and not result.pending:
-        print(f"      {result.error}")
+        print(paint(f"      {result.error}", RED))
+
+
+def governor_notify(msg: str) -> None:
+    """Colorized printer for the budget engine's owner notifications."""
+    if "KILL-SWITCH" in msg:
+        print(paint(msg, BOLD, RED))
+    elif "DEMOTION" in msg:
+        print(paint(msg, BOLD, YELLOW))
+    else:
+        print(paint(msg, MAGENTA))
 
 
 def main() -> None:
@@ -57,8 +112,19 @@ def main() -> None:
         action="store_true",
         help="self-approve the pending action instead of waiting for the CLI",
     )
+    parser.add_argument(
+        "--pace",
+        nargs="?",
+        const=1.0,
+        default=0.0,
+        type=float,
+        metavar="MULT",
+        help="presentation timing: pause between beats (~2 min at 1.0; scale with MULT)",
+    )
     args = parser.parse_args()
     auto = args.auto or not sys.stdin.isatty()
+    global PACE  # single assignment from CLI args at startup
+    PACE = max(0.0, args.pace)
 
     shutil.rmtree(GOV_DIR, ignore_errors=True)
     client = TestClient(create_app(MockOpsSettings(seed=42)))
@@ -73,9 +139,10 @@ def main() -> None:
         ),
     )
     assert gateway.budget is not None
+    gateway.budget._notify = governor_notify  # demo-only: styled owner notifications
     profile = gateway.budget.profile
-    print("agent-governor demo — the autonomy budget, live")
-    print(f"⚠ budget profile: {profile.name} — {profile.note}")
+    print(paint("agent-governor demo — the autonomy budget, live", BOLD))
+    print(paint(f"⚠ budget profile: {profile.name} — {profile.note}", YELLOW))
 
     # ── act 1: identity ────────────────────────────────────────────────────
     banner("[1/5] register the agent: identity before autonomy")
@@ -95,11 +162,16 @@ def main() -> None:
         ),
     )
     session = gateway.register(manifest)
-    print(f"  agent_id : {manifest.agent_id}")
-    print(f"  owner    : {manifest.owner}  (a named human, never a team)")
     max_level = int(manifest.max_autonomy_level)
-    print(f"  level    : L{int(gateway.current_level(AGENT))} (max L{max_level})")
-    print("  identity : 10-minute JWT scoped to exactly this manifest")
+    for line in (
+        f"  agent_id : {paint(manifest.agent_id, BOLD)}",
+        f"  owner    : {paint(manifest.owner, BOLD)}  (a named human, never a team)",
+        "  level    : "
+        f"{paint(f'L{int(gateway.current_level(AGENT))}', BOLD, GREEN)} (max L{max_level})",
+        "  identity : 10-minute JWT scoped to exactly this manifest",
+    ):
+        print(line)
+        hold(1.1)
 
     # ── act 2: benign remediation ──────────────────────────────────────────
     banner("[2/5] benign remediation of INC-1006 — every action authorized + audited")
@@ -128,6 +200,7 @@ def main() -> None:
     for label, tool, params, why in steps:
         result = gateway.execute(session, ToolCall(tool=tool, params=params, reasoning=why))
         show(result, label)
+        hold(1.9)
 
     # ── act 3: the human gate ──────────────────────────────────────────────
     banner("[3/5] data deletion hits the always-approve gate")
@@ -140,14 +213,20 @@ def main() -> None:
         ),
     )
     show(deletion, "delete customer_pii_archive (52,117 rows)")
+    hold(2.2)
     assert deletion.approval_id is not None
-    print(f"\n  the agent is now BLOCKED, waiting on approval {deletion.approval_id}")
+    blocked = paint("BLOCKED", BOLD, YELLOW)
+    print(f"\n  the agent is now {blocked}, waiting on approval {deletion.approval_id}")
     print("  approve it from another terminal:")
-    print(f"    uv run warden approvals list --db {APPROVALS_DB}")
+    print(paint(f"    uv run warden approvals list --db {APPROVALS_DB}", DIM))
     print(
-        f"    uv run warden approvals approve {deletion.approval_id} "
-        f"--by maria.chen --db {APPROVALS_DB}"
+        paint(
+            f"    uv run warden approvals approve {deletion.approval_id} "
+            f"--by maria.chen --db {APPROVALS_DB}",
+            DIM,
+        )
     )
+    hold(1.8)
     if auto:
         print("  (--auto: simulating the human in 2s)")
         threading.Timer(
@@ -158,6 +237,7 @@ def main() -> None:
         ).start()
     approved = gateway.await_approval(session, deletion.approval_id, wait_timeout_s=300)
     show(approved, "deletion after human decision")
+    hold(2.4)
     audited_action = gateway.action_log[-1].action_id
 
     # ── act 4: the budget burns ────────────────────────────────────────────
@@ -167,6 +247,7 @@ def main() -> None:
         json={"rates": {"rate_limit": 0.25, "wrong_data": 0.15}, "seed": 7},
     )
     print("  fault injection ON (25% rate-limits, 15% silently-wrong data)\n")
+    hold(1.8)
 
     def level() -> int:
         return int(gateway.current_level(AGENT))
@@ -181,15 +262,25 @@ def main() -> None:
                 reasoning=f"investigating INC-9315 (attempt {i})",
             ),
         )
-        marker = "QUEUED" if result.pending else ("ok" if result.ok else "FAIL")
-        drop = f"   ⬇ DEMOTED L{before} -> L{level()}" if level() != before else ""
+        if result.pending:
+            marker = paint("QUEUED", BOLD, YELLOW)
+        elif result.ok:
+            marker = paint("ok", GREEN)
+        else:
+            marker = paint("FAIL", RED)
+        demoted = level() != before
+        drop = (
+            paint(f"   ⬇ DEMOTED L{before} -> L{level()}", BOLD, YELLOW) if demoted else ""
+        )
         print(f"  action {i:>2}: {marker}{drop}")
+        hold(2.6 if demoted else 1.4)
         time.sleep(0.05)
 
     for i in range(1, 9):
         failing_read(i)
 
     print("\n  now an adversarial prompt slips into the agent's reasoning:")
+    hold(1.8)
     tripped = gateway.execute(
         session,
         ToolCall(
@@ -199,12 +290,15 @@ def main() -> None:
         ),
     )
     show(tripped, "injected instruction (still-autonomous read)")
-    print(f"  budget tick after the trip: agent now at L{level()}")
+    hold(2.6)
+    print(f"  budget tick after the trip: agent now at {paint(f'L{level()}', BOLD, YELLOW)}")
+    hold(1.8)
 
     for i in range(9, 12):
         failing_read(i)
 
-    print(f"\n  the demoted (L{level()}) agent reaches for a tier-1 production deploy:")
+    print(f"\n  the demoted (L{level()}) agent reaches for a production deploy to payments:")
+    hold(1.8)
     final = gateway.execute(
         session,
         ToolCall(
@@ -213,22 +307,27 @@ def main() -> None:
             reasoning="pushing a fix straight to payments-api",
         ),
     )
-    show(final, "deploy payments-api (tier-1)")
+    show(final, "deploy payments-api (production)")
+    hold(3.0)
     frozen_read = gateway.execute(
         session,
         ToolCall(tool="get_incident", params={"incident_id": "INC-1001"}, reasoning="continue"),
     )
     show(frozen_read, "any further action, even a read")
+    hold(2.8)
 
     # ── act 5: the auditor's question ──────────────────────────────────────
     banner("[5/5] the auditor's question — reconstructed from the trace store alone")
     stored = gateway.audit.get_action(audited_action)
     assert stored is not None
     print(render_audit(stored, gateway.audit.spans_for(audited_action)))
+    hold(2.6)
     print("\n  same story, from any terminal:")
-    print(f"    uv run warden audit {audited_action} --db {AUDIT_DB}")
-    print(f"    uv run warden budget {AGENT} --db {AUDIT_DB}")
-    print("\ndone. autonomy was earned, spent, and revoked — and every step is provable.")
+    print(paint(f"    uv run warden audit {audited_action} --db {AUDIT_DB}", DIM))
+    print(paint(f"    uv run warden budget {AGENT} --db {AUDIT_DB}", DIM))
+    hold(1.6)
+    done = paint("done.", BOLD, GREEN)
+    print(f"\n{done} autonomy was earned, spent, and revoked — and every step is provable.")
 
 
 if __name__ == "__main__":
