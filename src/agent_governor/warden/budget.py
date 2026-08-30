@@ -71,7 +71,7 @@ class BudgetProfile(BaseModel):
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> BudgetProfile:
-        return cls.model_validate(yaml.safe_load(Path(path).read_text()))
+        return cls.model_validate(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
 
 
 class SloSnapshot(BaseModel):

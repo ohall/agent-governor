@@ -34,7 +34,7 @@ class GuardrailConfig(BaseModel):
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> GuardrailConfig:
-        raw: dict[str, Any] = yaml.safe_load(Path(path).read_text())
+        raw: dict[str, Any] = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
         return cls.model_validate(raw)
 
     def latency_range(self, check: str) -> tuple[float, float]:

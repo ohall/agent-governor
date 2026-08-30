@@ -16,6 +16,7 @@ Acts:
 from __future__ import annotations
 
 import argparse
+import io
 import os
 import shutil
 import sys
@@ -38,6 +39,12 @@ APPROVALS_DB = str(GOV_DIR / "approvals.sqlite3")
 AUDIT_DB = str(GOV_DIR / "audit.sqlite3")
 
 # ── zero-dependency terminal styling ─────────────────────────────────────────
+
+# Windows pipes (Git Bash/MinTTY, CI redirects) default to cp1252, which cannot
+# encode the ⚠/⬇/─ glyphs this demo prints.
+for _stream in (sys.stdout, sys.stderr):
+    if isinstance(_stream, io.TextIOWrapper) and _stream.encoding.lower() not in ("utf-8", "utf8"):
+        _stream.reconfigure(encoding="utf-8")
 
 COLOR = (sys.stdout.isatty() or bool(os.environ.get("FORCE_COLOR"))) and not os.environ.get(
     "NO_COLOR"

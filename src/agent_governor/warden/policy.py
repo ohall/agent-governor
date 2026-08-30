@@ -98,7 +98,7 @@ class PolicyEngine:
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> PolicyEngine:
-        raw = yaml.safe_load(Path(path).read_text())
+        raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
         return cls.from_dict(raw)
 
     @classmethod
