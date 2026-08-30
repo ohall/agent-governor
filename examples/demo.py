@@ -269,9 +269,7 @@ def main() -> None:
         else:
             marker = paint("FAIL", RED)
         demoted = level() != before
-        drop = (
-            paint(f"   ⬇ DEMOTED L{before} -> L{level()}", BOLD, YELLOW) if demoted else ""
-        )
+        drop = paint(f"   ⬇ DEMOTED L{before} -> L{level()}", BOLD, YELLOW) if demoted else ""
         print(f"  action {i:>2}: {marker}{drop}")
         hold(2.6 if demoted else 1.4)
         time.sleep(0.05)

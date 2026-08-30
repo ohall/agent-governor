@@ -34,18 +34,18 @@ reasoning. If a record can't answer that, the logging is wrong.
 Requires [uv](https://docs.astral.sh/uv/). Everything below is keyless and deterministic.
 
 ```bash
-git clone https://github.com/<you>/agent-governor && cd agent-governor
+git clone https://github.com/sandeepmb/agent-governor && cd agent-governor
 uv sync
 make test     # 168 tests, ~10s
-make demo     # the full story in ~1 minute (interactive approval — see below)
+make demo     # the full story in ~2 minutes (interactive approval — see below)
 ```
 
 `make demo` walks the whole arc: an agent registers at L4 with a named owner → remediates an
 incident end-to-end with every action authorized and audited → hits the human gate on a PII
 deletion (approve it live from a second terminal with `warden approvals approve <id> --by you`,
 or pass `--auto`) → fault injection and an adversarial prompt burn the budget with **live
-demotions printed as they happen** → the demoted agent reaches for a tier-1 deploy and trips
-the kill-switch → `warden audit` reconstructs the approved deletion from the trace store alone.
+demotions printed as they happen** → the demoted agent reaches for a production deploy to
+payments and trips the kill-switch → `warden audit` reconstructs the approved deletion from the trace store alone.
 
 Per-milestone stories live in [`examples/`](examples/), and the CLI works cross-process:
 
