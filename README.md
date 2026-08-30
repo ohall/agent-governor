@@ -1,5 +1,7 @@
 # Governor
 
+[![CI](https://github.com/sandeepmb/agent-governor/actions/workflows/ci.yml/badge.svg)](https://github.com/sandeepmb/agent-governor/actions/workflows/ci.yml)
+
 **Autonomy is earned, measured, and revocable — or it isn't governance.**
 
 Everyone now agrees AI agents should "earn trust." Almost nobody has shipped the part that
